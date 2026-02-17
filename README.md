@@ -1,8 +1,5 @@
 # Wearable Wireless Heart Monitor (Capstone Project)
 
-**Role:** Firmware Engineer & System Architect  
-**Status:** Prototype Validated (Week 5)  
-**Target:** 250Hz Real-Time ECG Analysis
 
 ## Project Overview
 A low-power, wearable ECG device capable of real-time R-peak detection, heart rate variability analysis, and Bluetooth transmission. This project ports the industry-standard **Pan-Tompkins Algorithm** to an embedded Cortex-M4 environment, optimized for battery-constrained operation.
@@ -35,7 +32,7 @@ wearable-heart-monitor/
 │   ├── realtime_plotter.py   # Live serial grapher (Matplotlib)
 │   └── requirements.txt      # Python dependencies
 │
-└── docs/                     # Architecture & Weekly Reports
+└── docs/                     # System Block Diagram and other docs
 ```
 
 
