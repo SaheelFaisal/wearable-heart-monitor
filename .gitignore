@@ -18,6 +18,7 @@ venv/
 .env
 .venv
 *.ipynb_checkpoints
+tempCodeRunnerFile.py
 
 # --- OS Junk Files ---
 .DS_Store

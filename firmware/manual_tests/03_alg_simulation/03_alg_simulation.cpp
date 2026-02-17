@@ -1,18 +1,13 @@
 #include <Arduino.h>
+#include "test_signal.h" // Ensure this file exists in your 'include' folder
 
 // ================================================================
-// HARDWARE CONFIGURATION
+// CONFIGURATION
 // ================================================================
-#define ADC_PIN A0            // Pin connected to AD8232 Output
-#define LED_PIN LED_BUILTIN   // For blinking on heartbeat
+const int SAMPLE_RATE_HZ = 250;
+const int SAMPLE_INTERVAL_US = 1000000 / SAMPLE_RATE_HZ; // 4000us
 
-// Global Flags for Interrupt Communication
-volatile bool data_ready = false;
-volatile int latest_sample = 0;
-
-// ================================================================
-// ALGORITHM CONFIGURATION
-// ================================================================
+// --- ALGORITHM SETTINGS ---
 const int MWI_WINDOW_SIZE = 37;       // 150ms window @ 250Hz
 const unsigned long REFRACTORY_PERIOD_MS = 350; // Minimum time between beats
 
@@ -27,13 +22,11 @@ const float SOS[3][6] = {
 };
 
 // ================================================================
-// GLOBAL VARIABLES (Algorithm State)
+// GLOBAL VARIABLES
 // ================================================================
-// Filter State
+// Filter & Algorithm State
 float w[3][2] = {0}; 
 float prev_filtered_sample = 0;
-
-// MWI State
 float mwi_buffer[MWI_WINDOW_SIZE] = {0};
 int mwi_ptr = 0;
 float mwi_sum = 0;
@@ -43,74 +36,51 @@ float threshold_i = 2000.0;
 float threshold_f = 500.0;     
 float signal_peak = 0.0;
 float noise_peak = 0.0;
-unsigned long last_beat_time = 0;
+unsigned long last_beat_time = 0; // Time of the *previous* valid beat
 
 // BPM Calculation State
 float current_bpm = 0.0;
+
+// Timing State
+unsigned long last_sample_time = 0;
+int playback_index = 0; 
 
 // --- FUNCTION PROTOTYPES ---
 void processPanTompkins(int raw_input);
 void detectPeak(float signal);
 void calculateBPM(unsigned long now);
 
-
-// ================================================================
-// SETUP
-// ================================================================
 void setup() {
   Serial.begin(115200);
-  pinMode(ADC_PIN, INPUT);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH); // Off (Active Low)
+  pinMode(LED_BUILTIN, OUTPUT);
   
-  // High resolution for better signal quality
-  analogReadResolution(12); 
-
-  // --- HARDWARE TIMER 1 SETUP (250Hz Interrupt) ---
-  NRF_TIMER1->MODE      = TIMER_MODE_MODE_Timer;
-  NRF_TIMER1->BITMODE   = TIMER_BITMODE_BITMODE_16Bit;
-  NRF_TIMER1->PRESCALER = 4;  // 16MHz / 2^4 = 1MHz
-  NRF_TIMER1->CC[0]     = 4000; // 1MHz / 4000 = 250Hz
-  NRF_TIMER1->SHORTS    = TIMER_SHORTS_COMPARE0_CLEAR_Enabled << TIMER_SHORTS_COMPARE0_CLEAR_Pos;
-  NRF_TIMER1->INTENSET  = TIMER_INTENSET_COMPARE0_Set << TIMER_INTENSET_COMPARE0_Pos;
-  
-  NVIC_EnableIRQ(TIMER1_IRQn);
-  NRF_TIMER1->TASKS_START = 1;
+  // Turn LED off initially (High is OFF for XIAO)
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
-// ================================================================
-// INTERRUPT SERVICE ROUTINE (Runs every 4ms)
-// ================================================================
-extern "C" void TIMER1_IRQHandler() {
-  if (NRF_TIMER1->EVENTS_COMPARE[0]) {
-    NRF_TIMER1->EVENTS_COMPARE[0] = 0; // Clear Event
-    
-    // 1. Read Sensor Immediately
-    latest_sample = analogRead(ADC_PIN);
-    
-    // 2. Set Flag for Main Loop
-    data_ready = true;
-  }
-}
-
-// ================================================================
-// MAIN LOOP
-// ================================================================
 void loop() {
-  // Check if the Interrupt gave us a new sample
-  if (data_ready) {
-    
-    // 1. Grab the data safely (atomic read)
-    int raw_val = latest_sample;
-    data_ready = false; // Reset flag
+  unsigned long current_time = micros();
 
-    // 2. Run the Algorithm
-    processPanTompkins(raw_val);
+  // --- STRICT TIMING LOOP (250Hz) ---
+  if (current_time - last_sample_time >= SAMPLE_INTERVAL_US) {
+    last_sample_time = current_time;
+
+    // READ FROM ARRAY (Playback Mode)
+    int raw_adc = TEST_SIGNAL[playback_index];
+
+    // Loop the playback
+    playback_index++;
+    if (playback_index >= TEST_SIGNAL_LEN) {
+      playback_index = 0;
+    }
+
+    // PROCESS SAMPLE
+    processPanTompkins(raw_adc);
   }
 }
 
 // ================================================================
-// ALGORITHM IMPLEMENTATION
+// CORE ALGORITHM
 // ================================================================
 void processPanTompkins(int raw_input) {
   
@@ -151,7 +121,8 @@ void processPanTompkins(int raw_input) {
 void detectPeak(float signal) {
   unsigned long now = millis();
 
-  // --- SERIAL OUTPUT FOR PYTHON PLOTTER ---
+  // --- SERIAL OUTPUT FOR PYTHON ---
+  // Format: "Signal:123,Threshold:456,BPM:72"
   Serial.print("Signal:");
   Serial.print(signal);
   Serial.print(",");
@@ -173,28 +144,26 @@ void detectPeak(float signal) {
     signal_peak = signal;
     threshold_i = (0.125 * signal_peak) + (0.875 * threshold_i); 
     
-    // Calculate BPM
+    // Calculate BPM before updating time
     calculateBPM(now);
     
     last_beat_time = now;
     
     // Blink LED
-    digitalWrite(LED_PIN, LOW);  // ON
-    // Note: No delay() here because it would block our loop processing!
-    // If you want a longer blink, use a non-blocking timer logic, 
-    // but for now a short blip is fine or add a tiny delay(10) if loop allows.
-    delay(10); 
-    digitalWrite(LED_PIN, HIGH); // OFF
+    digitalWrite(LED_BUILTIN, LOW);  // ON
+    delay(20);                       // Visible Blip
+    digitalWrite(LED_BUILTIN, HIGH); // OFF
 
   } else {
     // NOISE PROCESSING
     noise_peak = signal;
     threshold_f = (0.125 * noise_peak) + (0.875 * threshold_f);
     
-    // Decay Threshold
+    // CRITICAL FIX: DECAY WITH A FLOOR
+    // Decay slowly
     threshold_i *= 0.9995; 
     
-    // FLOOR CLAMP (Prevent threshold from dropping too low)
+    // FORCE A MINIMUM: Prevent it from dropping below 2000 (Adjust based on your plot)
     if (threshold_i < 2000.0) {
       threshold_i = 2000.0; 
     }
@@ -202,19 +171,24 @@ void detectPeak(float signal) {
 }
 
 void calculateBPM(unsigned long now) {
-  if (last_beat_time == 0) return; // Ignore first beat
+  if (last_beat_time == 0) return; // Ignore first beat (need interval)
 
   unsigned long delta_ms = now - last_beat_time;
+  
+  // Calculate Instantaneous BPM
+  // 60,000 ms in a minute / ms between beats
   float instantaneous_bpm = 60000.0 / delta_ms;
 
   // --- DEBUG: PRINT RAW BPM ---
   Serial.print("Raw_Inst_BPM:");
-  Serial.println(instantaneous_bpm); 
+  Serial.println(instantaneous_bpm); // Print this to catch the glitch
 
-  // Sanity Check (30-240 BPM)
+  // Simple Sanity Check (Human heart range 30-220)
   if (instantaneous_bpm > 30 && instantaneous_bpm < 240) {
+    // Apply Smoothing (Running Average)
+    // 10% new value, 90% old value -> Smooths out jitter
     if (current_bpm == 0) {
-      current_bpm = instantaneous_bpm; 
+      current_bpm = instantaneous_bpm; // First valid reading
     } else {
       current_bpm = (0.9 * current_bpm) + (0.1 * instantaneous_bpm);
     }
