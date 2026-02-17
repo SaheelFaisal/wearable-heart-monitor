@@ -1,0 +1,28 @@
+# --- PlatformIO & Arduino ---
+.pio
+.pio/
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+*.hex
+*.bin
+*.elf
+*.map
+
+# --- Python (Vital for your simulation folder) ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.venv
+*.ipynb_checkpoints
+
+# --- OS Junk Files ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- VS Code User Settings ---
+.vscode/
