@@ -23,16 +23,23 @@ A low-power, wearable ECG device capable of real-time R-peak detection, heart ra
 wearable-heart-monitor/
 ├── firmware/                 # PlatformIO C++ Project (nRF52840)
 │   ├── src/                  # Main application logic
-│   │   └── main.cpp          # Pan-Tompkins implementation
+│   │   └── main.cpp          # Core Pan-Tompkins implementation
 │   ├── include/              # Header files
 │   │   └── test_signal.h     # MIT-BIH Dataset (Record 100)
+│   ├── manual_tests/         # Development milestones and unit tests
+│   │   ├── 01_blink/         # Basic GPIO and hardware verification
+│   │   ├── 02_adc_sampling/  # Timer-driven ADC register configuration
+│   │   └── 03_alg_simulation/# Algorithm validation using test data
+│   ├── lib/                  # Local libraries
+│   ├── test/                 # Unit testing framework
 │   └── platformio.ini        # Build configuration
 │
 ├── simulation/               # Python Validation Tools
-│   ├── realtime_plotter.py   # Live serial grapher (Matplotlib)
+│   ├── realtime_plotter.py   # Live serial telemetry (Matplotlib)
 │   └── requirements.txt      # Python dependencies
 │
-└── docs/                     # System Block Diagram and other docs
+└── docs/                     # System Documentation
+    └── system_diagram.png
 ```
 
 
