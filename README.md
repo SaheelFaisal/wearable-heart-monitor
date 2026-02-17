@@ -5,7 +5,7 @@
 A low-power, wearable ECG device capable of real-time R-peak detection, heart rate variability analysis, and Bluetooth transmission. This project ports the industry-standard **Pan-Tompkins Algorithm** to an embedded Cortex-M4 environment, optimized for battery-constrained operation.
 
 - **MCU:** Seeed XIAO nRF52840 (ARM Cortex-M4F @ 64MHz)
-- **Sensor:** AD8232 Single Lead Heart Rate Monitor (Analog Front End)
+- **Analog Front End (AFE):** Custom-designed PCB featuring an Instrumentation Amplifier, Active Bandpass Filtering (0.5-40Hz), and Right Leg Drive (RLD) circuit.
 - **Power:** <50mA active current (Lithium-Ion)
 - **Sampling Rate:** 250 Hz (4ms period)
 
