@@ -11,7 +11,7 @@ signal = record.p_signal[:, 0]
 fs_original = record.fs  # 360 Hz
 
 # --------------------------------------------------
-# 2. RESAMPLE TO 250 Hz (match your firmware)
+# 2. RESAMPLE TO 250 Hz
 # --------------------------------------------------
 fs = 250  # New sampling frequency
 

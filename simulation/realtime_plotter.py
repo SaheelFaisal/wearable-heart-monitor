@@ -2,93 +2,101 @@ import serial
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import collections
-import time
 
 # --- CONFIGURATION ---
-SERIAL_PORT = 'COM7'   # <--- CHECK YOUR PORT
+SERIAL_PORT = 'COM4'   # <--- DOUBLE CHECK THIS IN PLATFORMIO
 BAUD_RATE = 115200
-PLOT_WINDOW = 500      # How many samples to show
+PLOT_WINDOW = 500      
 
 # --- DATA BUFFERS ---
+raw_data = collections.deque([0] * PLOT_WINDOW, maxlen=PLOT_WINDOW)
 signal_data = collections.deque([0] * PLOT_WINDOW, maxlen=PLOT_WINDOW)
 threshold_data = collections.deque([0] * PLOT_WINDOW, maxlen=PLOT_WINDOW)
 
-# --- SETUP PLOT ---
-fig, ax = plt.subplots(figsize=(10, 6))
-line_signal, = ax.plot([], [], label='Integrated Signal', color='blue', linewidth=1.5)
-line_threshold, = ax.plot([], [], label='Adaptive Threshold', color='orange', linestyle='--', linewidth=1.5)
+# --- SETUP PLOTS (2 Vertical Subplots) ---
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+fig.tight_layout(pad=4.0)
 
-# Style the plot
-ax.set_xlim(0, PLOT_WINDOW)
-ax.set_ylim(0, 4000) # Initial guess, it will auto-scale
-ax.legend(loc='upper right')
-ax.set_title("Waiting for Data...", fontsize=14)
-ax.set_ylabel("Amplitude")
-ax.grid(True, alpha=0.3)
+# Top Plot: Raw Signal
+line_raw, = ax1.plot([], [], label='Raw ECG Signal', color='green', linewidth=1.5)
+ax1.set_xlim(0, PLOT_WINDOW)
+ax1.set_ylim(0, 4096)  
+ax1.legend(loc='upper right')
+ax1.set_title("Raw Sensor Input", fontsize=12)
+ax1.set_ylabel("ADC Value")
+ax1.grid(True, alpha=0.3)
 
-# Global variables for the title
+# Bottom Plot: Integrated Signal & Adaptive Threshold
+line_signal, = ax2.plot([], [], label='Integrated Signal', color='blue', linewidth=1.5)
+line_threshold, = ax2.plot([], [], label='Adaptive Threshold', color='orange', linestyle='--', linewidth=1.5)
+ax2.set_xlim(0, PLOT_WINDOW)
+ax2.set_ylim(0, 4000) 
+ax2.legend(loc='upper right')
+ax2.set_title("Pan-Tompkins Algorithm State", fontsize=12)
+ax2.set_ylabel("Amplitude")
+ax2.set_xlabel("Samples")
+ax2.grid(True, alpha=0.3)
+
 current_bpm = 0.0
-last_raw_bpm = 0.0
 
 # --- SERIAL CONNECTION ---
 try:
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
     print(f"Connected to {SERIAL_PORT}")
-    print("Watching for 'Raw_Inst_BPM' glitches... (Keep this window open)")
+    print("Listening for Telemetry... (Keep this window open)")
 except Exception as e:
     print(f"Error opening serial port: {e}")
     exit()
 
 def update(frame):
-    global current_bpm, last_raw_bpm
+    global current_bpm
     
     try:
-        # Read all waiting lines to clear buffer (keeps plot real-time)
         while ser.in_waiting:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
             
-            # --- TYPE 1: STANDARD STREAM (Signal:..., Threshold:..., BPM:...) ---
-            if line.startswith("Signal:"):
+            # --- DEBUG PRINT ---
+            # This will show you exactly what Python is hearing!
+            print(f"MCU Says: {line}") 
+            
+            if line.startswith("Raw:"):
                 parts = line.split(',')
-                if len(parts) >= 3:
-                    # Parse Data
-                    sig = float(parts[0].split(':')[1])
-                    thr = float(parts[1].split(':')[1])
-                    bpm = float(parts[2].split(':')[1])
+                if len(parts) >= 4:
+                    raw_val = float(parts[0].split(':')[1])
+                    sig_val = float(parts[1].split(':')[1])
+                    thr_val = float(parts[2].split(':')[1])
+                    bpm_val = float(parts[3].split(':')[1])
                     
-                    # Update Buffers
-                    signal_data.append(sig)
-                    threshold_data.append(thr)
-                    current_bpm = bpm
+                    raw_data.append(raw_val)
+                    signal_data.append(sig_val)
+                    threshold_data.append(thr_val)
+                    current_bpm = bpm_val
 
-            # --- TYPE 2: DEBUG EVENT (Raw_Inst_BPM:...) ---
-            elif line.startswith("Raw_Inst_BPM:"):
-                val = float(line.split(':')[1])
-                last_raw_bpm = val
-                print(f" >> BEAT DETECTED! Raw Instant BPM: {val:.1f}") 
-                # ^^^ Look at this in the terminal! 
-
-        # --- UPDATE PLOT ---
+        # --- UPDATE PLOTS ---
+        line_raw.set_ydata(raw_data)
+        line_raw.set_xdata(range(len(raw_data)))
+        
         line_signal.set_ydata(signal_data)
         line_signal.set_xdata(range(len(signal_data)))
+        
         line_threshold.set_ydata(threshold_data)
         line_threshold.set_xdata(range(len(threshold_data)))
         
-        # Dynamic Title
-        ax.set_title(f"Pan-Tompkins Algorithm\nAvg BPM: {current_bpm:.1f}  |  Last Raw: {last_raw_bpm:.1f}", fontsize=14)
+        fig.suptitle(f"Real-Time ECG Telemetry  |  Avg BPM: {current_bpm:.1f}", fontsize=16, fontweight='bold')
 
-        # Optional: Auto-scale Y-Axis slowly
         if len(signal_data) > 10:
             peak = max(max(signal_data), max(threshold_data))
-            if peak > ax.get_ylim()[1] or peak < ax.get_ylim()[1] * 0.5:
-                 ax.set_ylim(0, max(2000, peak * 1.2))
+            if peak > ax2.get_ylim()[1] or peak < ax2.get_ylim()[1] * 0.5:
+                 ax2.set_ylim(0, max(2000, peak * 1.2))
 
     except Exception as e:
+        print(f"Data parsing error: {e}") # Unmasking the silent errors
         pass 
 
-    return line_signal, line_threshold
+    return line_raw, line_signal, line_threshold
 
 # --- RUN ---
-ani = FuncAnimation(fig, update, interval=20, blit=False)
+# Added cache_frame_data=False to fix the Matplotlib warning
+ani = FuncAnimation(fig, update, interval=20, blit=False, cache_frame_data=False)
 plt.show()
 ser.close()

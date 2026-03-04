@@ -1,10 +1,10 @@
 #include <Arduino.h>
+#include "mbed.h"  // Brings in the RTOS timer libraries
 
 // ================================================================
 // HARDWARE CONFIGURATION
 // ================================================================
-#define ADC_PIN A0            // Pin connected to AD8232 Output
-#define LED_PIN LED_BUILTIN   // For blinking on heartbeat
+#define ADC_PIN A0            // Pin connected to Custom AFE (InAmp Output)
 
 // Global Flags for Interrupt Communication
 volatile bool data_ready = false;
@@ -20,7 +20,6 @@ const unsigned long REFRACTORY_PERIOD_MS = 350; // Minimum time between beats
 // FILTER COEFFICIENTS (3rd Order Butterworth 5-15Hz @ 250Hz)
 // ================================================================
 const float SOS[3][6] = {
-  // { b0, b1, b2, a0, a1, a2 }
   { 1.56701035e-03,  3.13402070e-03,  1.56701035e-03, 1.0, -1.73356294e+00, 7.75679511e-01 },
   { 1.00000000e+00,  0.00000000e+00, -1.00000000e+00, 1.0, -1.71760092e+00, 8.33876287e-01 },
   { 1.00000000e+00, -2.00000000e+00,  1.00000000e+00, 1.0, -1.91702538e+00, 9.33967717e-01 }
@@ -29,82 +28,66 @@ const float SOS[3][6] = {
 // ================================================================
 // GLOBAL VARIABLES (Algorithm State)
 // ================================================================
-// Filter State
 float w[3][2] = {0}; 
 float prev_filtered_sample = 0;
 
-// MWI State
 float mwi_buffer[MWI_WINDOW_SIZE] = {0};
 int mwi_ptr = 0;
 float mwi_sum = 0;
 
-// Peak Detection State
 float threshold_i = 2000.0;    
 float threshold_f = 500.0;     
 float signal_peak = 0.0;
 float noise_peak = 0.0;
 unsigned long last_beat_time = 0;
 
-// BPM Calculation State
 float current_bpm = 0.0;
 
 // --- FUNCTION PROTOTYPES ---
 void processPanTompkins(int raw_input);
-void detectPeak(float signal);
+void detectPeak(float signal, int raw_signal);
 void calculateBPM(unsigned long now);
 
+// Create the RTOS Hardware Ticker Object
+mbed::Ticker sample_ticker;
+
+// ================================================================
+// INTERRUPT SERVICE ROUTINE (Runs exactly every 4ms)
+// ================================================================
+void timer_isr() {
+  data_ready = true; 
+}
 
 // ================================================================
 // SETUP
 // ================================================================
 void setup() {
   Serial.begin(115200);
+  delay(2000); 
+  Serial.println("\n--- MCU BOOTING UP ---");
+
   pinMode(ADC_PIN, INPUT);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH); // Off (Active Low)
-  
-  // High resolution for better signal quality
   analogReadResolution(12); 
 
-  // --- HARDWARE TIMER 1 SETUP (250Hz Interrupt) ---
-  NRF_TIMER1->MODE      = TIMER_MODE_MODE_Timer;
-  NRF_TIMER1->BITMODE   = TIMER_BITMODE_BITMODE_16Bit;
-  NRF_TIMER1->PRESCALER = 4;  // 16MHz / 2^4 = 1MHz
-  NRF_TIMER1->CC[0]     = 4000; // 1MHz / 4000 = 250Hz
-  NRF_TIMER1->SHORTS    = TIMER_SHORTS_COMPARE0_CLEAR_Enabled << TIMER_SHORTS_COMPARE0_CLEAR_Pos;
-  NRF_TIMER1->INTENSET  = TIMER_INTENSET_COMPARE0_Set << TIMER_INTENSET_COMPARE0_Pos;
+  // --- START THE HARDWARE TICKER ---
+  // 0.004 seconds = 4 milliseconds = 250Hz
+  sample_ticker.attach(&timer_isr, 0.004); 
   
-  NVIC_EnableIRQ(TIMER1_IRQn);
-  NRF_TIMER1->TASKS_START = 1;
-}
-
-// ================================================================
-// INTERRUPT SERVICE ROUTINE (Runs every 4ms)
-// ================================================================
-extern "C" void TIMER1_IRQHandler() {
-  if (NRF_TIMER1->EVENTS_COMPARE[0]) {
-    NRF_TIMER1->EVENTS_COMPARE[0] = 0; // Clear Event
-    
-    // 1. Read Sensor Immediately
-    latest_sample = analogRead(ADC_PIN);
-    
-    // 2. Set Flag for Main Loop
-    data_ready = true;
-  }
+  Serial.println("--- mbed RTOS TICKER STARTED (250Hz) ---");
 }
 
 // ================================================================
 // MAIN LOOP
 // ================================================================
 void loop() {
-  // Check if the Interrupt gave us a new sample
+  // Wait for the hardware timer to give us the green light
   if (data_ready) {
+    data_ready = false; // Reset flag immediately
     
-    // 1. Grab the data safely (atomic read)
-    int raw_val = latest_sample;
-    data_ready = false; // Reset flag
+    // 1. Read Sensor Safely Outside the ISR
+    int raw_val = analogRead(ADC_PIN);
 
-    // 2. Run the Algorithm
+    // 2. Run the DSP Algorithm
     processPanTompkins(raw_val);
   }
 }
@@ -144,15 +127,18 @@ void processPanTompkins(int raw_input) {
 
   float integrated = mwi_sum / MWI_WINDOW_SIZE;
 
-  // 5. PEAK DETECTION
-  detectPeak(integrated);
+  // 5. PEAK DETECTION (Passing raw signal for telemetry)
+  detectPeak(integrated, raw_input);
 }
 
-void detectPeak(float signal) {
+void detectPeak(float signal, int raw_signal) {
   unsigned long now = millis();
 
   // --- SERIAL OUTPUT FOR PYTHON PLOTTER ---
-  Serial.print("Signal:");
+  Serial.print("Raw:");
+  Serial.print(raw_signal);
+  Serial.print(",");
+  Serial.print("Integrated:");
   Serial.print(signal);
   Serial.print(",");
   Serial.print("Threshold:");
@@ -175,16 +161,7 @@ void detectPeak(float signal) {
     
     // Calculate BPM
     calculateBPM(now);
-    
     last_beat_time = now;
-    
-    // Blink LED
-    digitalWrite(LED_PIN, LOW);  // ON
-    // Note: No delay() here because it would block our loop processing!
-    // If you want a longer blink, use a non-blocking timer logic, 
-    // but for now a short blip is fine or add a tiny delay(10) if loop allows.
-    delay(10); 
-    digitalWrite(LED_PIN, HIGH); // OFF
 
   } else {
     // NOISE PROCESSING
@@ -194,7 +171,7 @@ void detectPeak(float signal) {
     // Decay Threshold
     threshold_i *= 0.9995; 
     
-    // FLOOR CLAMP (Prevent threshold from dropping too low)
+    // FLOOR CLAMP
     if (threshold_i < 2000.0) {
       threshold_i = 2000.0; 
     }
@@ -206,10 +183,6 @@ void calculateBPM(unsigned long now) {
 
   unsigned long delta_ms = now - last_beat_time;
   float instantaneous_bpm = 60000.0 / delta_ms;
-
-  // --- DEBUG: PRINT RAW BPM ---
-  Serial.print("Raw_Inst_BPM:");
-  Serial.println(instantaneous_bpm); 
 
   // Sanity Check (30-240 BPM)
   if (instantaneous_bpm > 30 && instantaneous_bpm < 240) {
