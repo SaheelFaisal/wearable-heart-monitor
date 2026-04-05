@@ -25,11 +25,13 @@ wearable-heart-monitor/
 │   ├── src/                  # Main application logic
 │   │   └── main.cpp          # Core Pan-Tompkins implementation
 │   ├── include/              # Header files
-│   │   └── test_signal.h     # MIT-BIH Dataset (Record 100)
+│   │   ├── test_signal.h     # MIT-BIH Dataset (Record 100)
 │   ├── manual_tests/         # Development milestones and unit tests
 │   │   ├── 01_blink/         # Basic GPIO and hardware verification
 │   │   ├── 02_adc_sampling/  # Timer-driven ADC register configuration
-│   │   └── 03_alg_simulation/# Algorithm validation using test data
+│   │   ├── 03_alg_simulation/# Algorithm validation using test data
+|   |   ├── 04_adc_with_alg/  # ADC and Algorithm combined test
+|   |   └── 05_adc_dsp_ble_integration/ # BLE Integration
 │   ├── lib/                  # Local libraries
 │   ├── test/                 # Unit testing framework
 │   └── platformio.ini        # Build configuration
@@ -74,7 +76,7 @@ python simulation/realtime_plotter.py
 
 
 
-## Performance Metrics (Week 5 Validation)
+## Performance Metrics
 - **Validation Source:** MIT-BIH Record 100 (Playback Mode)
 - **Average Heart Rate:** ~75 BPM (consistent with dataset ground truth)
 - **Processing Latency:** < 50 µs per sample (estimated on Cortex-M4F @ 64MHz)
