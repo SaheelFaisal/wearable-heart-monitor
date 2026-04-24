@@ -31,7 +31,8 @@ wearable-heart-monitor/
 │   │   ├── 02_adc_sampling/  # Timer-driven ADC register configuration
 │   │   ├── 03_alg_simulation/# Algorithm validation using test data
 |   |   ├── 04_adc_with_alg/  # ADC and Algorithm combined test
-|   |   └── 05_adc_dsp_ble_integration/ # BLE Integration
+|   |   ├── 05_adc_dsp_ble_integration/ # BLE Integration
+|   |   └── 06_live_waveform_integration/ # Live waveform visualizer and battery monitoring
 │   ├── lib/                  # Local libraries
 │   ├── test/                 # Unit testing framework
 │   └── platformio.ini        # Build configuration
